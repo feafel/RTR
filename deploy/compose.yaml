@@ -1,0 +1,38 @@
+services:
+  rln:
+    build:
+      context: ${RLN_SRC:-../../rgb-lightning-node/dev}
+    command: ["/data", "--config", "/etc/rln/config.toml"]
+    volumes:
+      - ./rln.toml:/etc/rln/config.toml:ro
+      - rln-data:/data
+    ports:
+      - "9735:9735"
+    networks: [internal]
+    restart: unless-stopped
+
+  rtr:
+    build:
+      context: ..
+    command: ["--config", "/etc/rtr/config.toml"]
+    volumes:
+      - ./rtr.toml:/etc/rtr/config.toml:ro
+      - rtr-db:/var/lib/rtr
+    ports:
+      - "${RTR_BIND:-127.0.0.1}:${RTR_PORT:-3101}:3101"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1:3101/rtr/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    depends_on: [rln]
+    networks: [internal]
+    restart: unless-stopped
+
+networks:
+  internal:
+
+volumes:
+  rln-data:
+  rtr-db:
