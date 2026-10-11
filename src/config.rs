@@ -20,6 +20,8 @@ pub enum ConfigError {
     InvalidRlnUrl(String),
     #[error("service.listen_port must not be 0")]
     InvalidPort,
+    #[error("service.listen_addr is not a valid IP address: {0}")]
+    InvalidListenAddr(String),
     #[error("{0} must not be 0")]
     ZeroInterval(&'static str),
 }
@@ -39,6 +41,7 @@ pub struct Config {
 #[serde(default, deny_unknown_fields)]
 pub struct Service {
     pub listen_port: u16,
+    pub listen_addr: String,
     pub auth_token: Option<String>,
 }
 
@@ -46,6 +49,7 @@ impl Default for Service {
     fn default() -> Self {
         Self {
             listen_port: 3101,
+            listen_addr: "127.0.0.1".into(),
             auth_token: None,
         }
     }
@@ -174,6 +178,11 @@ impl Config {
         }
         if self.service.listen_port == 0 {
             return Err(ConfigError::InvalidPort);
+        }
+        if self.service.listen_addr.parse::<IpAddr>().is_err() {
+            return Err(ConfigError::InvalidListenAddr(
+                self.service.listen_addr.clone(),
+            ));
         }
         for (name, value) in [
             (
@@ -333,6 +342,22 @@ mod tests {
         cfg.webhook.secret = "s".into();
         cfg.service.listen_port = 0;
         assert!(matches!(cfg.validate(), Err(ConfigError::InvalidPort)));
+    }
+
+    #[test]
+    fn listen_addr_defaults_to_loopback_and_rejects_garbage() {
+        let mut cfg = Config::load(None).unwrap();
+        assert_eq!(cfg.service.listen_addr, "127.0.0.1");
+        cfg.webhook.url = "http://127.0.0.1:9000/hook".into();
+        cfg.webhook.secret = "s".into();
+        assert!(cfg.validate().is_ok());
+        cfg.service.listen_addr = "not-an-ip".into();
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigError::InvalidListenAddr(_))
+        ));
+        cfg.service.listen_addr = "0.0.0.0".into();
+        assert!(cfg.validate().is_ok());
     }
 
     #[test]

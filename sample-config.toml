@@ -1,6 +1,9 @@
 [service]
 # port the RTR API listens on
 listen_port = 3101
+# address the RTR API binds to; loopback by default because proxied RLN routes
+# carry no RTR auth — set 0.0.0.0 only behind a firewall / reverse proxy
+listen_addr = "127.0.0.1"
 # bearer token required on RTR API calls; unset means no auth
 #auth_token = ""
 

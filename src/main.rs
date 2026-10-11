@@ -16,6 +16,8 @@ struct Args {
     #[arg(long)]
     listen_port: Option<u16>,
     #[arg(long)]
+    listen_addr: Option<String>,
+    #[arg(long)]
     rln_url: Option<String>,
     #[arg(long)]
     db_path: Option<String>,
@@ -27,6 +29,9 @@ struct Args {
 fn apply_overrides(mut cfg: Config, args: &Args) -> Config {
     if let Some(port) = args.listen_port {
         cfg.service.listen_port = port;
+    }
+    if let Some(addr) = &args.listen_addr {
+        cfg.service.listen_addr = addr.clone();
     }
     if let Some(url) = &args.rln_url {
         cfg.rln.base_url = url.clone();
@@ -78,7 +83,18 @@ async fn run(args: Args) -> Result<(), AppError> {
     let app = build_app(&cfg, openapi).await?;
     app.engine.probe().await?;
     let port = cfg.service.listen_port;
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
+    let addr = cfg.service.listen_addr.clone();
+    // Proxied RLN routes carry no RTR auth by design, so an externally reachable
+    // listener exposes fund-moving endpoints to the network. Default is loopback;
+    // shout when the operator opens it up.
+    if !addr
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+    {
+        warn!(addr = %addr, "listening on a non-loopback address: proxied RLN routes have no RTR auth");
+    }
+    let listener = tokio::net::TcpListener::bind((addr.as_str(), port))
         .await
         .map_err(|e| AppError::Bind(port, e))?;
     let mut handles = spawn_background(&app);
@@ -90,7 +106,7 @@ async fn run(args: Args) -> Result<(), AppError> {
             Err(e) => error!(error = %e, "reconcile failed"),
         }
     }));
-    info!(port, "listening");
+    info!(addr = %addr, port, "listening");
     let served = axum::serve(listener, build_router(app.state.clone()))
         .with_graceful_shutdown(shutdown_signal())
         .await;
