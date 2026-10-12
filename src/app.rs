@@ -25,6 +25,9 @@ pub struct AppState {
     pub openapi: Option<Bytes>,
     pub auth_token: Option<String>,
     pub webhook_max_attempts: u32,
+    /// Upstream successes whose mirror hook failed (transfer invisible to
+    /// refresh/reap and webhooks). Surfaced in /rtr/health; monotonic per boot.
+    pub hook_failures: std::sync::atomic::AtomicU64,
 }
 
 pub struct App {
@@ -72,6 +75,7 @@ pub async fn build_app(cfg: &Config, openapi: Option<Bytes>) -> Result<App, AppE
         openapi,
         auth_token: cfg.service.auth_token.clone(),
         webhook_max_attempts: cfg.webhook.max_attempts,
+        hook_failures: std::sync::atomic::AtomicU64::new(0),
     });
     Ok(App {
         state,
@@ -151,6 +155,7 @@ pub async fn test_state(proxy: Proxy, rln: Arc<crate::rln::test_support::MockRln
         openapi: None,
         auth_token: None,
         webhook_max_attempts: config::Webhook::default().max_attempts,
+        hook_failures: std::sync::atomic::AtomicU64::new(0),
     }
 }
 

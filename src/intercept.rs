@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
@@ -9,7 +10,7 @@ use axum::Router;
 use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::app::AppState;
 use crate::engine::EngineError;
@@ -100,7 +101,11 @@ where
             resp: resp.body.clone(),
         };
         if let Err(e) = on_success(state.clone(), ex).await {
-            warn!(path = %path, error = %e, "interceptor hook failed");
+            // The upstream call succeeded but the mirror failed: the transfer is
+            // invisible to refresh/reap and webhooks. Count it for /rtr/health and
+            // log at error so it cannot pass unnoticed.
+            state.hook_failures.fetch_add(1, Ordering::Relaxed);
+            error!(path = %path, error = %e, "interceptor hook failed");
         }
     } else {
         note_locked(state, &resp).await;
@@ -514,6 +519,27 @@ mod tests {
         assert_eq!(rows[0].asset_id, None);
         assert_eq!(rows[0].kind.as_deref(), Some("ReceiveWitness"));
         assert_eq!(rows[0].recipient_id.as_deref(), Some("r1"));
+    }
+
+    #[tokio::test]
+    async fn rgbinvoice_malformed_success_counts_hook_failure() {
+        // Upstream 200 with an unparseable body: the caller still gets the 200,
+        // but nothing was mirrored — the counter must record the stranded transfer.
+        let server = MockServer::start().await;
+        mount(&server, "/rgbinvoice", 200, br#"{"bogus":true}"#).await;
+        let (_, state, app) = harness(&server.uri()).await;
+
+        let (status, body) = call(app, invoice_req(Some("A"), false)).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, br#"{"bogus":true}"#);
+        assert!(rows(&state).await.is_empty());
+        assert_eq!(
+            state
+                .hook_failures
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
     }
 
     #[tokio::test]

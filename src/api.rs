@@ -94,6 +94,7 @@ struct Health {
     pending_payments: usize,
     parked_events: u64,
     last_full_sync_at: Option<i64>,
+    hook_failures: u64,
 }
 
 fn node_name(s: NodeState) -> &'static str {
@@ -127,6 +128,9 @@ async fn health(State(state): State<Arc<AppState>>) -> Result<Json<Health>, ApiE
         pending_payments,
         parked_events,
         last_full_sync_at,
+        hook_failures: state
+            .hook_failures
+            .load(std::sync::atomic::Ordering::Relaxed),
     }))
 }
 
@@ -347,7 +351,8 @@ mod tests {
                 "pending_transfers": 2,
                 "pending_payments": 1,
                 "parked_events": 1,
-                "last_full_sync_at": null
+                "last_full_sync_at": null,
+                "hook_failures": 0
             })
         );
 
